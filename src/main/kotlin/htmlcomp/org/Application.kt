@@ -2,6 +2,7 @@ package htmlcomp.org
 
 import htmlcomp.org.plugins.*
 import io.ktor.client.*
+import io.ktor.client.engine.cio.*
 import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
@@ -22,10 +23,6 @@ import org.slf4j.event.Level
 
 fun main() {
     embeddedServer(Netty, port = 8080, host = "0.0.0.0", module = Application::module).start(wait = true)
-}
-
-fun app(client: HttpClient) {
-    TODO("Not yet implemented")
 }
 
 fun Application.module() {
@@ -49,25 +46,35 @@ fun Application.module() {
     }
 
     val dependencies = DependenciesFactory()
+    val productLocation = Location(
+        path = "/{country}/{language}/product/{...}",
+        upstream = "http://product.upstream",
+    )
+    val locations = listOf(productLocation)
     routing {
         get("/metrics-micrometer") {
             call.respond<String>(appMicrometerRegistry.scrape())
         }
-        setupRoutes(dependencies)
+        setupRoutes(dependencies, locations)
     }
 }
 
-class DependenciesFactory: IDependenciesFactory {
-    override val httpClient = HttpClient()
+class DependenciesFactory : IDependenciesFactory {
+    override val httpClient = HttpClient(CIO)
 }
 
 interface IDependenciesFactory {
     val httpClient: HttpClient
 }
 
-fun Routing.setupRoutes(deps: IDependenciesFactory) {
-    get("/{country}/{language}/product/{...}") {
-        val response = deps.httpClient.get("https://ktor.io/")
-        call.respond(HttpStatusCode.OK, response.bodyAsText())
+data class Location(val path: String, val upstream: String)
+
+fun Routing.setupRoutes(deps: IDependenciesFactory, locations: List<Location>) {
+    for (location in locations) {
+        get(location.path) {
+            val url = "${location.upstream}${call.request.path()}?${call.request.queryString()}"
+            val response = deps.httpClient.get(url)
+            call.respond(HttpStatusCode.OK, response.bodyAsText())
+        }
     }
 }

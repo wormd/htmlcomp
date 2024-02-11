@@ -10,37 +10,41 @@ import io.ktor.server.testing.*
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
-class MockedDependenciesFactory : IDependenciesFactory {
-    override var httpClient = HttpClient(MockEngine {
-        respond(content = "", status = HttpStatusCode.OK)
-    })
-}
+private fun engineWithSimpleResponse() = MockEngine { respond(content = "<h1>boo</h1>") }
 
-fun replaceDepsWith(block: MockedDependenciesFactory.() -> Unit): IDependenciesFactory {
-    val instance = MockedDependenciesFactory()
-    instance.block()
-    return instance
-}
+const val simpleResponse = "<h1>boo</h1>"
+
+val productLocation = Location(
+    path = "/{country}/{language}/product/{...}",
+    upstream = "http://product.upstream",
+)
+
+val locations = listOf(productLocation)
 
 class ApplicationTest {
     @Test
     fun `returns upstream data`() = testApplication {
-        val deps = replaceDepsWith {
-            httpClient = HttpClient(MockEngine { respond(content = "<h1>boo</h1>") })
-        }
-        routes { setupRoutes(deps) }
+        val deps = replaceDepsWith { httpClient = HttpClient(engineWithSimpleResponse()) }
+        routes { setupRoutes(deps, locations) }
 
         val response = client.get("/it/it/product/1234boo")
 
-        assertEquals("<h1>boo</h1>", response.bodyAsText())
+        assertEquals(simpleResponse, response.bodyAsText())
         assertEquals(HttpStatusCode.OK, response.status)
     }
-}
 
-fun ApplicationTestBuilder.routes(routing: Routing.() -> Unit) {
-    application {
-        routing {
-            routing()
-        }
+    @Test
+    fun `reverse proxies to correct url`() = testApplication {
+        val engine = engineWithSimpleResponse()
+        val deps = replaceDepsWith { httpClient = HttpClient(engine) }
+        routes { setupRoutes(deps, locations) }
+
+        val calledPath = "/it/it/product/1234boo?test=due"
+        client.get(calledPath)
+
+        val url = engine.requestHistory.first().url.toString()
+        assertEquals(url, "${productLocation.upstream}${calledPath}")
+//        val clientCalledPath = engine.requestHistory.first().url.encodedPathAndQuery
+//        assertEquals(clientCalledPath, calledPath)
     }
 }

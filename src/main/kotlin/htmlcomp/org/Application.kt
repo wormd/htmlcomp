@@ -1,5 +1,7 @@
 package htmlcomp.org
 
+import htmlcomp.org.components.Fetched
+import htmlcomp.org.components.fetchReplacements
 import htmlcomp.org.plugins.*
 import io.ktor.client.*
 import io.ktor.client.engine.cio.*
@@ -74,7 +76,20 @@ fun Routing.setupRoutes(deps: IDependenciesFactory, locations: List<Location>) {
         get(location.path) {
             val url = "${location.upstream}${call.request.path()}?${call.request.queryString()}"
             val response = deps.httpClient.get(url)
-            call.respond(HttpStatusCode.OK, response.bodyAsText())
+            val content = response.bodyAsText()
+
+            val fetchedContent = fetchReplacements(content, deps.httpClient)
+            val replaced = doReplace(content, fetchedContent)
+
+            call.respond(HttpStatusCode.OK, replaced)
         }
     }
+}
+
+private fun doReplace(content: String, replaces: List<Fetched>): String {
+    var toReplace = content.substring(0)
+    replaces.forEach {
+        toReplace = toReplace.replace(it.raw, it.content)
+    }
+    return toReplace
 }
